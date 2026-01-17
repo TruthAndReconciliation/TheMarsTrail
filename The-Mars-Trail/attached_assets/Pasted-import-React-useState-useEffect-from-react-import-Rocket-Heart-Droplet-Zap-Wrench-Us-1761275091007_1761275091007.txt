@@ -1,0 +1,1014 @@
+import React, { useState, useEffect } from 'react';
+import { Rocket, Heart, Droplet, Zap, Wrench, Users, AlertTriangle } from 'lucide-react';
+
+const MarsTrail = () => {
+  const [gameState, setGameState] = useState('menu'); // menu, setup, playing, gameover, victory
+  const [shipName, setShipName] = useState('');
+  const [crewRole, setCrewRole] = useState('');
+  const [difficulty, setDifficulty] = useState('');
+  const [crewCount, setCrewCount] = useState(4);
+  const [distance, setDistance] = useState(0);
+  const [resources, setResources] = useState({
+    hull: 100,
+    oxygen: 100,
+    water: 100,
+    fuel: 100,
+    repairParts: 20,
+    food: 100
+  });
+  const [crewNames, setCrewNames] = useState({
+    crew1: '',
+    crew2: '',
+    crew3: '',
+    crew4: '',
+    crew5: '',
+    crew6: '',
+    crew7: ''
+  });
+  const [crew, setCrew] = useState([]);
+  const [currentEvent, setCurrentEvent] = useState(null);
+  const [log, setLog] = useState([]);
+  const [day, setDay] = useState(0);
+  const [animating, setAnimating] = useState(false);
+  const [lastHarvestMilestone, setLastHarvestMilestone] = useState(0);
+  const [lastEVAMilestone, setLastEVAMilestone] = useState(0);
+  const [afterburnerActive, setAfterburnerActive] = useState(false);
+  const [afterburnerDaysRemaining, setAfterburnerDaysRemaining] = useState(0);
+  const [afterburnerCooldown, setAfterburnerCooldown] = useState(0);
+
+  const TOTAL_DISTANCE = 225000000; // km to Mars
+  const DAYS_TO_MARS = 180;
+
+  const events = [
+    {
+      id: 1,
+      title: "Life Support Malfunction",
+      description: "The oxygen recycling system is failing! Pressure is dropping rapidly.",
+      choices: [
+        { text: "Emergency repair with parts", effect: () => ({ repairParts: -3, oxygen: 10 }) },
+        { text: "Ration oxygen and hope it holds", effect: () => ({ oxygen: -15, crewHealth: -5 }) },
+        { text: "Reroute power from non-essential systems", effect: () => ({ fuel: -10, oxygen: 5 }) }
+      ]
+    },
+    {
+      id: 2,
+      title: "Solar Flare Detected",
+      description: "A massive solar flare is heading your way! Radiation levels are spiking.",
+      choices: [
+        { text: "Take shelter in shielded section", effect: () => ({ fuel: -5, crewHealth: -2 }) },
+        { text: "Continue course and risk exposure", effect: () => ({ crewHealth: -15 }) },
+        { text: "Ride the solar wind (risky boost)", effect: () => ({ fuel: 12, crewHealth: -8, day: -2 }) }
+      ]
+    },
+    {
+      id: 3,
+      title: "Meteor Strike!",
+      description: "A small meteor has punctured the hull! Pressure is venting into space.",
+      choices: [
+        { text: "Emergency patch with repair kit", effect: () => ({ repairParts: -5, hull: -10 }) },
+        { text: "Seal off the damaged section", effect: () => ({ hull: -20, water: -10 }) },
+        { text: "Attempt a risky EVA repair", effect: () => ({ repairParts: -2, hull: -5, crewHealth: -8 }) }
+      ]
+    },
+    {
+      id: 4,
+      title: "Water Recycler Contamination",
+      description: "The water recycling system is contaminated. The crew is at risk.",
+      choices: [
+        { text: "Purge and clean the system", effect: () => ({ water: -20, repairParts: -2 }) },
+        { text: "Use emergency water reserves", effect: () => ({ water: -30 }) },
+        { text: "Filter manually (takes time)", effect: () => ({ day: 2, crewHealth: -3 }) }
+      ]
+    },
+    {
+      id: 5,
+      title: "Gravity Assist Opportunity",
+      description: "You're passing near a large asteroid. A gravity assist could save fuel!",
+      choices: [
+        { text: "Calculate and execute maneuver", effect: () => ({ fuel: 15, day: -1 }) },
+        { text: "Too risky - maintain current course", effect: () => ({ fuel: -3 }) },
+        { text: "Aggressive slingshot (dangerous)", effect: () => ({ fuel: 25, crewHealth: -10, repairParts: -2 }) }
+      ]
+    },
+    {
+      id: 6,
+      title: "Crew Member Illness",
+      description: "One of your crew is showing signs of space sickness. It could spread.",
+      choices: [
+        { text: "Quarantine and treat aggressively", effect: () => ({ singleCrewHealth: -8, food: -10 }) },
+        { text: "Monitor and hope it passes", effect: () => ({ singleCrewHealth: -15 }) },
+        { text: "Use medical supplies", effect: () => ({ repairParts: -1, singleCrewHealth: -5 }) }
+      ]
+    },
+    {
+      id: 7,
+      title: "Fuel Recovery System Activated",
+      description: "Your engineer discovered unused fuel reserves in the backup tanks!",
+      choices: [
+        { text: "Transfer all reserves carefully", effect: () => ({ fuel: 20, day: 1 }) },
+        { text: "Quick transfer (might lose some)", effect: () => ({ fuel: 12 }) },
+        { text: "Save for emergency - partial transfer", effect: () => ({ fuel: 8, repairParts: 2 }) }
+      ]
+    },
+    {
+      id: 8,
+      title: "Derelict Satellite Detected",
+      description: "You've found an abandoned satellite with salvageable fuel cells!",
+      choices: [
+        { text: "EVA mission to salvage fuel", effect: () => ({ fuel: 18, crewHealth: -5, day: 2 }) },
+        { text: "Remote extraction (less efficient)", effect: () => ({ fuel: 10, repairParts: -1 }) },
+        { text: "Too dangerous - pass it by", effect: () => ({ fuel: -2 }) }
+      ]
+    },
+    {
+      id: 9,
+      title: "Engine Efficiency Breakthrough",
+      description: "Your scientist has optimized the engine combustion algorithm!",
+      choices: [
+        { text: "Implement new efficiency settings", effect: () => ({ fuel: 15 }) },
+        { text: "Test cautiously first", effect: () => ({ fuel: 8, day: 1 }) },
+        { text: "Stick with proven systems", effect: () => ({ fuel: -3 }) }
+      ]
+    },
+    {
+      id: 10,
+      title: "Fuel Line Leak",
+      description: "You're losing fuel! The leak needs to be contained immediately.",
+      choices: [
+        { text: "Emergency patch and recover some fuel", effect: () => ({ fuel: -8, repairParts: -4 }) },
+        { text: "Reroute through backup lines", effect: () => ({ fuel: -25 }) },
+        { text: "Complex repair to minimize loss", effect: () => ({ fuel: -5, repairParts: -6, day: 2 }) }
+      ]
+    },
+    {
+      id: 11,
+      title: "Solar Panel Cleaning Opportunity",
+      description: "Dust has accumulated on solar panels. Cleaning them could boost power efficiency.",
+      choices: [
+        { text: "EVA to clean panels thoroughly", effect: () => ({ fuel: 10, crewHealth: -3, day: 1 }) },
+        { text: "Use robotic arm to clean", effect: () => ({ fuel: 6, repairParts: -1 }) },
+        { text: "Leave them - not worth the risk", effect: () => ({ fuel: -4 }) }
+      ]
+    },
+    {
+      id: 12,
+      title: "Comet Tail Passage",
+      description: "You're about to pass through a comet's tail. The ice could be harvested for fuel production!",
+      choices: [
+        { text: "Deploy collectors and process ice", effect: () => ({ fuel: 20, water: 15, day: 3 }) },
+        { text: "Quick pass-through collection", effect: () => ({ fuel: 10, water: 8 }) },
+        { text: "Avoid the tail entirely", effect: () => ({ fuel: -5, day: 1 }) }
+      ]
+    },
+    {
+      id: 13,
+      title: "Messages from Earth",
+      description: "The communication array has received personal messages from loved ones back on Earth!",
+      choices: [
+        { text: "Share messages with the crew", effect: () => ({ crewHealth: 15 }) },
+        { text: "Private viewing for each member", effect: () => ({ crewHealth: 12, day: 1 }) },
+        { text: "Save bandwidth for emergencies", effect: () => ({ crewHealth: -5 }) }
+      ]
+    },
+    {
+      id: 14,
+      title: "Crew Member Depression",
+      description: "The isolation and monotony of space is taking a psychological toll on the crew.",
+      choices: [
+        { text: "Organize group activities and counseling", effect: () => ({ crewHealth: -3, food: -5, day: 1 }) },
+        { text: "Prescribe rest and meditation", effect: () => ({ crewHealth: -8, day: 2 }) },
+        { text: "Push through - stay focused on mission", effect: () => ({ crewHealth: -15 }) }
+      ]
+    },
+    {
+      id: 15,
+      title: "Anniversary Celebration",
+      description: "It's been exactly one month since launch! The crew wants to celebrate the milestone.",
+      choices: [
+        { text: "Hold a special meal and celebration", effect: () => ({ crewHealth: 10, food: -15 }) },
+        { text: "Small toast and acknowledgment", effect: () => ({ crewHealth: 5, food: -5 }) },
+        { text: "No time for celebrations", effect: () => ({ crewHealth: -8 }) }
+      ]
+    },
+    {
+      id: 16,
+      title: "Crew Conflict",
+      description: "Tensions are rising between crew members. A heated argument has broken out.",
+      choices: [
+        { text: "Mediate and resolve the conflict", effect: () => ({ crewHealth: -5, day: 1 }) },
+        { text: "Separate them for cooling off period", effect: () => ({ crewHealth: -10, day: 2 }) },
+        { text: "Let them work it out themselves", effect: () => ({ crewHealth: -18 }) }
+      ]
+    },
+    {
+      id: 17,
+      title: "Sleep Deprivation Crisis",
+      description: "The crew is suffering from chronic sleep deprivation due to irregular sleep schedules.",
+      choices: [
+        { text: "Enforce strict sleep schedules", effect: () => ({ crewHealth: -8, day: 3 }) },
+        { text: "Prescribe sleep aids from medical supplies", effect: () => ({ crewHealth: -3, repairParts: -2 }) },
+        { text: "Continue current schedule", effect: () => ({ crewHealth: -20 }) }
+      ]
+    },
+    {
+      id: 18,
+      title: "Exercise Equipment Malfunction",
+      description: "The exercise equipment has broken down. Without regular exercise, crew health will deteriorate.",
+      choices: [
+        { text: "Repair equipment immediately", effect: () => ({ repairParts: -5, crewHealth: 5 }) },
+        { text: "Improvise with bodyweight exercises", effect: () => ({ crewHealth: -5 }) },
+        { text: "Focus on mission - skip exercise", effect: () => ({ crewHealth: -15 }) }
+      ]
+    },
+    {
+      id: 19,
+      title: "Virtual Reality Entertainment",
+      description: "The crew discovers archived VR entertainment that could boost morale significantly.",
+      choices: [
+        { text: "Allow daily VR recreation time", effect: () => ({ crewHealth: 12, fuel: -5 }) },
+        { text: "Limited VR access on weekends", effect: () => ({ crewHealth: 6 }) },
+        { text: "VR is a distraction from the mission", effect: () => ({ crewHealth: -10 }) }
+      ]
+    },
+    {
+      id: 20,
+      title: "Homesickness Epidemic",
+      description: "Multiple crew members are experiencing severe homesickness and emotional distress.",
+      choices: [
+        { text: "Request live video call with Earth", effect: () => ({ crewHealth: 8, fuel: -8, day: 1 }) },
+        { text: "Share photos and memories together", effect: () => ({ crewHealth: 3, day: 1 }) },
+        { text: "Remind them of the mission importance", effect: () => ({ crewHealth: -12 }) }
+      ]
+    },
+    {
+      id: 21,
+      title: "Music Therapy Session",
+      description: "Someone suggests playing music to lift spirits. The crew hasn't heard music in weeks.",
+      choices: [
+        { text: "Host a music listening party", effect: () => ({ crewHealth: 10, food: -8 }) },
+        { text: "Personal listening time for everyone", effect: () => ({ crewHealth: 6 }) },
+        { text: "Silence is better for concentration", effect: () => ({ crewHealth: -7 }) }
+      ]
+    },
+    {
+      id: 22,
+      title: "Claustrophobia Attack",
+      description: "A crew member is having a severe claustrophobic panic attack in the confined space.",
+      choices: [
+        { text: "Emergency calming protocol with sedatives", effect: () => ({ singleCrewHealth: -8, repairParts: -2 }) },
+        { text: "Talk them through breathing exercises", effect: () => ({ singleCrewHealth: -12, day: 1 }) },
+        { text: "Let them work through it alone", effect: () => ({ singleCrewHealth: -25 }) }
+      ]
+    },
+    {
+      id: 23,
+      title: "Electrical Fire!",
+      description: "A fire has broken out in the electrical bay! A crew member was caught in the flames!",
+      choices: [
+        { text: "Use fire suppression system immediately", effect: () => ({ singleCrewHealth: -60, oxygen: -10 }) },
+        { text: "Manual firefighting with extinguishers", effect: () => ({ singleCrewHealth: -60, repairParts: -3, day: 1 }) },
+        { text: "Vent compartment to space (risky)", effect: () => ({ singleCrewHealth: -70, hull: -15 }) }
+      ]
+    }
+  ];
+
+  useEffect(() => {
+    if (gameState === 'playing' && !currentEvent) {
+      const interval = setInterval(() => {
+        setAnimating(true);
+        setTimeout(() => setAnimating(false), 500);
+        
+        setDay(prev => prev + 1);
+        
+        // Decrease afterburner cooldown
+        if (afterburnerCooldown > 0) {
+          setAfterburnerCooldown(prev => prev - 1);
+        }
+        
+        // Afterburner logic
+        if (afterburnerActive && afterburnerDaysRemaining > 0) {
+          setDistance(prev => Math.min(prev + (TOTAL_DISTANCE / DAYS_TO_MARS) * 2, TOTAL_DISTANCE)); // Double speed
+          
+          // Only increased fuel consumption with afterburner
+          setResources(prev => ({
+            ...prev,
+            water: Math.max(0, prev.water - 0.8),
+            fuel: Math.max(0, prev.fuel - 2.4), // 4x fuel consumption
+            food: Math.max(0, prev.food - 0.35)
+          }));
+          
+          setAfterburnerDaysRemaining(prev => {
+            const newDays = prev - 1;
+            if (newDays === 0) {
+              setAfterburnerActive(false);
+              setAfterburnerCooldown(30);
+              addLog("Afterburners disengaged. 30 day cooldown initiated.");
+            }
+            return newDays;
+          });
+        } else {
+          setDistance(prev => Math.min(prev + (TOTAL_DISTANCE / DAYS_TO_MARS), TOTAL_DISTANCE));
+          
+          // Normal resource consumption per day
+          setResources(prev => ({
+            ...prev,
+            water: Math.max(0, prev.water - 0.8),
+            fuel: Math.max(0, prev.fuel - 0.6),
+            food: Math.max(0, prev.food - 0.35)
+          }));
+        }
+
+        // Random event chance
+        if (Math.random() < 0.15) {
+          let randomEvent;
+          
+          // Check for food harvest milestone (every 30% of journey)
+          const currentMilestone = Math.floor(progressPercent / 30);
+          if (currentMilestone > lastHarvestMilestone && progressPercent >= 30) {
+            setLastHarvestMilestone(currentMilestone);
+            randomEvent = {
+              id: 'food_harvest',
+              title: "Hydroponic Garden Harvest!",
+              description: "The onboard hydroponic garden has produced a fresh crop! Your hard work is paying off.",
+              choices: [
+                { text: "Harvest the crops immediately", effect: () => ({ food: 15 }) },
+                { text: "Let them grow a bit more for bigger yield", effect: () => ({ food: 20, day: 3 }) },
+                { text: "Save for emergency (preserve current harvest)", effect: () => ({ food: 10 }) }
+              ]
+            };
+          }
+          // Check if water is critically low
+          else if (resources.water < 30 && resources.oxygen >= 20 && resources.fuel >= 20) {
+            // Force water creation event
+            randomEvent = {
+              id: 'water_critical',
+              title: "Critical Water Shortage!",
+              description: "Water reserves have dropped below 30%! Your engineer suggests using the ship's oxygen and fuel to synthesize additional water through electrolysis.",
+              choices: [
+                { text: "Use 20% oxygen and 20% fuel to create 30% water", effect: () => ({ oxygen: -20, fuel: -20, water: 30 }) },
+                { text: "Ration remaining water strictly", effect: () => ({ crewHealth: -8 }) },
+                { text: "Continue as is and hope for the best", effect: () => ({ crewHealth: -12 }) }
+              ]
+            };
+          } else {
+            randomEvent = events[Math.floor(Math.random() * events.length)];
+          }
+          
+          // Personalize event description if it involves crew
+          const personalizedEvent = { ...randomEvent };
+          if (personalizedEvent.id === 6) {
+            const aliveCrew = crew.filter(c => c.alive);
+            const randomCrewMember = aliveCrew[Math.floor(Math.random() * aliveCrew.length)];
+            personalizedEvent.description = `${randomCrewMember.name} is showing signs of space sickness. It could spread to the rest of the crew.`;
+            personalizedEvent.affectedCrewMember = randomCrewMember;
+          } else if (personalizedEvent.id === 22) {
+            const aliveCrew = crew.filter(c => c.alive);
+            const randomCrewMember = aliveCrew[Math.floor(Math.random() * aliveCrew.length)];
+            personalizedEvent.description = `${randomCrewMember.name} is having a severe claustrophobic panic attack in the confined space.`;
+            personalizedEvent.affectedCrewMember = randomCrewMember;
+          } else if (personalizedEvent.id === 23) {
+            const aliveCrew = crew.filter(c => c.alive);
+            const randomCrewMember = aliveCrew[Math.floor(Math.random() * aliveCrew.length)];
+            const healthLoss = Math.floor(Math.random() * 41) + 50; // Random between 50-90
+            personalizedEvent.description = `A fire has broken out in the electrical bay! ${randomCrewMember.name} was caught in the flames while trying to extinguish it!`;
+            personalizedEvent.affectedCrewMember = randomCrewMember;
+            personalizedEvent.fireHealthLoss = healthLoss;
+            personalizedEvent.choices = [
+              { text: "Use fire suppression system immediately", effect: () => ({ singleCrewHealth: -healthLoss, oxygen: -10 }) },
+              { text: "Manual firefighting with extinguishers", effect: () => ({ singleCrewHealth: -healthLoss, repairParts: -3, day: 1 }) },
+              { text: "Vent compartment to space (risky)", effect: () => ({ singleCrewHealth: -healthLoss - 10, hull: -15 }) }
+            ];
+          } else if (personalizedEvent.id === 9) {
+            const scientist = crew.find(c => c.role === 'Scientist');
+            personalizedEvent.description = `${scientist.name} has optimized the engine combustion algorithm!`;
+          } else if (personalizedEvent.id === 7) {
+            const engineer = crew.find(c => c.role === 'Engineer');
+            personalizedEvent.description = `${engineer.name} discovered unused fuel reserves in the backup tanks!`;
+          } else if (personalizedEvent.id === 'food_harvest') {
+            const biologist = crew.find(c => c.role === 'Biologist');
+            if (biologist) {
+              personalizedEvent.description = `${biologist.name} reports that the onboard hydroponic garden has produced a fresh crop! Your hard work is paying off.`;
+            }
+          }
+          setCurrentEvent(personalizedEvent);
+        }
+
+        // Check for game over conditions
+        const aliveCrew = crew.filter(c => c.alive).length;
+        if (aliveCrew === 0) {
+          setGameState('gameover');
+          addLog("All crew members have perished. Mission failed.");
+        }
+      }, 2000);
+
+      return () => clearInterval(interval);
+    }
+  }, [gameState, currentEvent, crew]);
+
+  useEffect(() => {
+    if (distance >= TOTAL_DISTANCE && gameState === 'playing') {
+      setGameState('victory');
+      const aliveCrew = crew.filter(c => c.alive).length;
+      addLog(`You've reached Mars! ${aliveCrew} crew members survived the journey.`);
+    }
+  }, [distance, gameState, crew]);
+
+  useEffect(() => {
+    // Check for critical resource failures
+    if (gameState === 'playing') {
+      if (resources.oxygen <= 0) {
+        setGameState('gameover');
+        addLog("Oxygen depleted. All crew members suffocated.");
+      } else if (resources.water <= 0) {
+        setGameState('gameover');
+        addLog("Water supply exhausted. Crew died of dehydration.");
+      } else if (resources.fuel <= 0) {
+        setGameState('gameover');
+        addLog("Fuel reserves empty. Ship lost in space forever.");
+      } else if (resources.food <= 0) {
+        setGameState('gameover');
+        addLog("Food supplies gone. Crew starved to death.");
+      } else if (resources.hull <= 0) {
+        setGameState('gameover');
+        addLog("Hull integrity compromised. Ship destroyed by decompression.");
+      }
+    }
+  }, [resources, gameState]);
+
+  const addLog = (message) => {
+    setLog(prev => [`Day ${day}: ${message}`, ...prev].slice(0, 10));
+  };
+
+  const crewRoles = ['Captain', 'Engineer', 'Medic', 'Scientist', 'Pilot', 'Biologist', 'Geologist'];
+
+  const startGame = () => {
+    if (!shipName || !crewRole || !difficulty) return;
+    
+    // Check if all required crew names are filled
+    let allNamesFilled = true;
+    for (let i = 1; i <= crewCount; i++) {
+      if (!crewNames[`crew${i}`]) {
+        allNamesFilled = false;
+        break;
+      }
+    }
+    if (!allNamesFilled) return;
+    
+    const difficultySettings = {
+      easy: { hull: 100, oxygen: 120, water: 120, fuel: 120, repairParts: 15, food: 120 },
+      medium: { hull: 100, oxygen: 100, water: 100, fuel: 100, repairParts: 10, food: 100 },
+      hard: { hull: 80, oxygen: 80, water: 80, fuel: 80, repairParts: 6, food: 80 }
+    };
+
+    setResources(difficultySettings[difficulty]);
+    
+    // Initialize crew with custom names and roles
+    const initialCrew = [];
+    for (let i = 1; i <= crewCount; i++) {
+      initialCrew.push({
+        name: crewNames[`crew${i}`],
+        role: crewRoles[i - 1],
+        health: 100,
+        alive: true
+      });
+    }
+    
+    setCrew(initialCrew);
+    setGameState('playing');
+    addLog(`The ${shipName} launches from Earth orbit. Destination: Mars!`);
+  };
+
+  const handleChoice = (choice) => {
+    const effect = choice.effect();
+    
+    setResources(prev => ({
+      hull: Math.max(0, Math.min(100, prev.hull + (effect.hull || 0))),
+      oxygen: Math.max(0, Math.min(100, prev.oxygen + (effect.oxygen || 0))),
+      water: Math.max(0, Math.min(100, prev.water + (effect.water || 0))),
+      fuel: Math.max(0, Math.min(100, prev.fuel + (effect.fuel || 0))),
+      repairParts: Math.max(0, prev.repairParts + (effect.repairParts || 0)),
+      food: Math.max(0, Math.min(100, prev.food + (effect.food || 0)))
+    }));
+
+    if (effect.crewHealth) {
+      const updatedCrew = crew.map(c => {
+        if (c.alive) {
+          const newHealth = Math.max(0, c.health + effect.crewHealth);
+          return { ...c, health: newHealth, alive: newHealth > 0 };
+        }
+        return c;
+      });
+      setCrew(updatedCrew);
+      
+      updatedCrew.forEach(c => {
+        if (!c.alive && crew.find(oc => oc.name === c.name).alive) {
+          addLog(`${c.name} has died.`);
+        }
+      });
+    }
+
+    // Handle single crew member health effects
+    if (effect.singleCrewHealth && currentEvent.affectedCrewMember) {
+      const updatedCrew = crew.map(c => {
+        if (c.name === currentEvent.affectedCrewMember.name && c.alive) {
+          const newHealth = Math.max(0, c.health + effect.singleCrewHealth);
+          return { ...c, health: newHealth, alive: newHealth > 0 };
+        }
+        return c;
+      });
+      setCrew(updatedCrew);
+      
+      updatedCrew.forEach(c => {
+        if (!c.alive && crew.find(oc => oc.name === c.name).alive) {
+          addLog(`${c.name} has died.`);
+        }
+      });
+    }
+
+    if (effect.day) {
+      setDay(prev => prev + effect.day);
+    }
+
+    addLog(`${currentEvent.title}: ${choice.text}`);
+    setCurrentEvent(null);
+  };
+
+  const synthesizeWater = () => {
+    if (resources.oxygen >= 20 && resources.fuel >= 20) {
+      setResources(prev => ({
+        ...prev,
+        oxygen: prev.oxygen - 20,
+        fuel: prev.fuel - 20,
+        water: Math.min(100, prev.water + 30)
+      }));
+      addLog("Synthesized water from oxygen and fuel reserves.");
+    }
+  };
+
+  const activateAfterburner = () => {
+    if (!afterburnerActive && afterburnerCooldown === 0 && resources.fuel >= 20) {
+      setAfterburnerActive(true);
+      setAfterburnerDaysRemaining(5);
+      addLog("Afterburners engaged! Moving at double speed for 5 days.");
+    }
+  };
+
+  const handleCrewNameChange = (role, value) => {
+    setCrewNames(prev => ({
+      ...prev,
+      [role]: value
+    }));
+  };
+
+  const resetGame = () => {
+    setGameState('menu');
+    setShipName('');
+    setCrewRole('');
+    setDifficulty('');
+    setCrewCount(4);
+    setDistance(0);
+    setResources({
+      hull: 100,
+      oxygen: 100,
+      water: 100,
+      fuel: 100,
+      repairParts: 20,
+      food: 100
+    });
+    setCrewNames({
+      crew1: '',
+      crew2: '',
+      crew3: '',
+      crew4: '',
+      crew5: '',
+      crew6: '',
+      crew7: ''
+    });
+    setCrew([]);
+    setCurrentEvent(null);
+    setLog([]);
+    setDay(0);
+    setAnimating(false);
+    setLastHarvestMilestone(0);
+    setLastEVAMilestone(0);
+    setAfterburnerActive(false);
+    setAfterburnerDaysRemaining(0);
+    setAfterburnerCooldown(0);
+  };
+
+  if (gameState === 'menu') {
+    return (
+      <div className="min-h-screen bg-gradient-to-b from-black via-blue-900 to-red-900 text-white p-8 flex items-center justify-center relative">
+        <div className="max-w-2xl text-center">
+          <Rocket className="w-24 h-24 mx-auto mb-6 text-red-500" />
+          <h1 className="text-6xl font-bold mb-4">The Martian Trail</h1>
+          <p className="text-xl mb-8 text-gray-300">
+            A 225 million kilometer journey to colonize the Red Planet. Will you survive?
+          </p>
+          <button
+            onClick={() => setGameState('setup')}
+            className="bg-gray-400 hover:bg-gray-500 text-gray-900 font-bold py-4 px-8 rounded-lg text-xl transition"
+          >
+            Begin Journey
+          </button>
+        </div>
+        <div className="absolute bottom-4 left-0 right-0 text-center">
+          <p className="text-sm text-white opacity-70">Created by Blake Stampley</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (gameState === 'setup') {
+    let allNamesFilled = shipName && crewRole && difficulty;
+    for (let i = 1; i <= crewCount; i++) {
+      if (!crewNames[`crew${i}`]) {
+        allNamesFilled = false;
+        break;
+      }
+    }
+
+    return (
+      <div className="min-h-screen bg-gradient-to-b from-gray-900 via-purple-900 to-black text-white p-8">
+        <div className="max-w-2xl mx-auto">
+          <h2 className="text-4xl font-bold mb-8 text-center">Mission Setup</h2>
+          
+          <div className="space-y-6 bg-gray-800 p-8 rounded-lg">
+            <div>
+              <label className="block text-lg mb-2">Ship Name:</label>
+              <input
+                type="text"
+                value={shipName}
+                onChange={(e) => setShipName(e.target.value)}
+                className="w-full p-3 bg-gray-700 rounded text-white"
+                placeholder="Enter your ship's name"
+              />
+            </div>
+
+            <div>
+              <label className="block text-lg mb-2">Your Role:</label>
+              <select
+                value={crewRole}
+                onChange={(e) => setCrewRole(e.target.value)}
+                className="w-full p-3 bg-gray-700 rounded text-white"
+              >
+                <option value="">Select a role</option>
+                <option value="Captain">Captain - Leadership bonus</option>
+                <option value="Engineer">Engineer - Repair bonus</option>
+                <option value="Medic">Medic - Health bonus</option>
+                <option value="Scientist">Scientist - Resource efficiency</option>
+                <option value="Pilot">Pilot - Navigation bonus</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-lg mb-2">Difficulty:</label>
+              <select
+                value={difficulty}
+                onChange={(e) => setDifficulty(e.target.value)}
+                className="w-full p-3 bg-gray-700 rounded text-white"
+              >
+                <option value="">Select difficulty</option>
+                <option value="easy">Easy - More resources</option>
+                <option value="medium">Medium - Standard resources</option>
+                <option value="hard">Hard - Limited resources</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-lg mb-2">Number of Crew Members:</label>
+              <select
+                value={crewCount}
+                onChange={(e) => setCrewCount(Number(e.target.value))}
+                className="w-full p-3 bg-gray-700 rounded text-white"
+              >
+                <option value={3}>3 Crew Members</option>
+                <option value={4}>4 Crew Members</option>
+                <option value={5}>5 Crew Members</option>
+                <option value={6}>6 Crew Members</option>
+                <option value={7}>7 Crew Members</option>
+              </select>
+            </div>
+
+            <div className="border-t border-gray-700 pt-6">
+              <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
+                <Users className="w-5 h-5" /> Name Your Crew
+              </h3>
+              
+              <div className="space-y-4">
+                {Array.from({ length: crewCount }, (_, i) => i + 1).map((num) => (
+                  <div key={num}>
+                    <label className="block text-sm mb-1 text-gray-300">{crewRoles[num - 1]}:</label>
+                    <input
+                      type="text"
+                      value={crewNames[`crew${num}`]}
+                      onChange={(e) => handleCrewNameChange(`crew${num}`, e.target.value)}
+                      className="w-full p-3 bg-gray-700 rounded text-white"
+                      placeholder={`Enter ${crewRoles[num - 1]}'s name`}
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <button
+              onClick={startGame}
+              disabled={!allNamesFilled}
+              className="w-full bg-red-600 hover:bg-red-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-bold py-4 rounded-lg text-xl transition mt-6"
+            >
+              Launch Mission
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (gameState === 'gameover') {
+    return (
+      <div className="min-h-screen bg-gradient-to-b from-gray-900 via-red-900 to-black text-white p-8 flex items-center justify-center">
+        <div className="max-w-2xl text-center">
+          <AlertTriangle className="w-24 h-24 mx-auto mb-6 text-red-500" />
+          <h1 className="text-6xl font-bold mb-4">Mission Failed</h1>
+          <p className="text-xl mb-8 text-gray-300">
+            The {shipName} was lost in space. All crew members perished on Day {day}.
+          </p>
+          <button
+            onClick={resetGame}
+            className="bg-red-600 hover:bg-red-700 text-white font-bold py-4 px-8 rounded-lg text-xl transition"
+          >
+            Try Again
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (gameState === 'victory') {
+    const aliveCrew = crew.filter(c => c.alive).length;
+    return (
+      <div className="min-h-screen bg-gradient-to-b from-gray-900 via-orange-900 to-red-900 text-white p-8 flex items-center justify-center">
+        <div className="max-w-2xl text-center">
+          <Rocket className="w-24 h-24 mx-auto mb-6 text-orange-500" />
+          <h1 className="text-6xl font-bold mb-4">Mission Success!</h1>
+          <p className="text-xl mb-4 text-gray-300">
+            The {shipName} has reached Mars after {day} days!
+          </p>
+          <p className="text-2xl mb-8 text-green-400">
+            {aliveCrew} crew member{aliveCrew !== 1 ? 's' : ''} survived the journey
+          </p>
+          <div className="bg-gray-800 p-6 rounded-lg mb-8">
+            <h3 className="text-xl font-bold mb-4">Survivors</h3>
+            <div className="space-y-2">
+              {crew.filter(c => c.alive).map((member, idx) => (
+                <div key={idx} className="text-green-400">
+                  {member.name} - {member.role}
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="bg-gray-800 p-6 rounded-lg mb-8">
+            <h3 className="text-xl font-bold mb-4">Final Status</h3>
+            <div className="grid grid-cols-2 gap-4 text-left">
+              <div>Hull: {Math.round(resources.hull)}%</div>
+              <div>Oxygen: {Math.round(resources.oxygen)}%</div>
+              <div>Water: {Math.round(resources.water)}%</div>
+              <div>Fuel: {Math.round(resources.fuel)}%</div>
+            </div>
+          </div>
+          <button
+            onClick={resetGame}
+            className="bg-orange-600 hover:bg-orange-700 text-white font-bold py-4 px-8 rounded-lg text-xl transition"
+          >
+            New Journey
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const progressPercent = (distance / TOTAL_DISTANCE) * 100;
+
+  return (
+    <div className="min-h-screen bg-gradient-to-b from-black via-gray-900 to-black text-white p-4">
+      {/* Header */}
+      <div className="max-w-6xl mx-auto mb-4">
+        <h1 className="text-3xl font-bold text-center mb-2">{shipName}</h1>
+        <p className="text-center text-gray-400">Day {day} - {Math.round(distance / 1000000)}M / 225M km</p>
+      </div>
+
+      {/* Space Scene */}
+      <div className="max-w-6xl mx-auto mb-6 bg-black rounded-lg overflow-hidden" style={{ height: '200px', position: 'relative' }}>
+        <div className="absolute inset-0 overflow-hidden">
+          {[...Array(50)].map((_, i) => (
+            <div
+              key={i}
+              className="absolute bg-white rounded-full"
+              style={{
+                width: Math.random() * 3 + 1 + 'px',
+                height: Math.random() * 3 + 1 + 'px',
+                top: Math.random() * 100 + '%',
+                left: Math.random() * 100 + '%',
+                opacity: Math.random() * 0.5 + 0.5
+              }}
+            />
+          ))}
+        </div>
+        
+        {/* Earth on the left */}
+        <div className="absolute left-4 top-1/2 transform -translate-y-1/2">
+          <div className="relative w-16 h-16">
+            <div className="absolute inset-0 rounded-full bg-gradient-to-br from-blue-400 via-green-500 to-blue-600"></div>
+            <div className="absolute inset-1 rounded-full bg-gradient-to-br from-blue-300 via-green-400 to-blue-500 opacity-80"></div>
+            {/* Clouds */}
+            <div className="absolute top-2 left-3 w-6 h-3 bg-white opacity-40 rounded-full blur-sm"></div>
+            <div className="absolute bottom-3 right-2 w-5 h-2 bg-white opacity-30 rounded-full blur-sm"></div>
+          </div>
+          <p className="text-xs text-center mt-1 text-blue-400">Earth</p>
+        </div>
+
+        {/* Mars on the right */}
+        <div className="absolute right-4 top-1/2 transform -translate-y-1/2">
+          <div className="relative w-16 h-16">
+            <div className="absolute inset-0 rounded-full bg-gradient-to-br from-red-600 via-orange-600 to-red-700"></div>
+            <div className="absolute inset-1 rounded-full bg-gradient-to-br from-red-500 via-orange-500 to-red-600 opacity-80"></div>
+            {/* Surface features */}
+            <div className="absolute top-4 left-5 w-3 h-3 bg-red-800 opacity-50 rounded-full"></div>
+            <div className="absolute bottom-5 right-4 w-2 h-2 bg-red-900 opacity-40 rounded-full"></div>
+            <div className="absolute top-8 left-2 w-4 h-2 bg-orange-800 opacity-30 rounded-full"></div>
+          </div>
+          <p className="text-xs text-center mt-1 text-red-400">Mars</p>
+        </div>
+        
+        <div
+          className={`absolute top-1/2 transform -translate-y-1/2 transition-all duration-500 ${animating ? 'scale-110' : 'scale-100'}`}
+          style={{ left: `calc(6% + ${progressPercent * 0.82}%)` }}
+        >
+          <div className="relative">
+            {/* Blue flame behind rocket */}
+            <div className="absolute left-0 top-1/2 transform -translate-y-1/2 -translate-x-full">
+              <div className="w-8 h-3 bg-gradient-to-l from-teal-400 to-transparent rounded-r-full opacity-90 animate-pulse"></div>
+            </div>
+            
+            {/* Rocket body - pointing right */}
+            <svg width="64" height="32" viewBox="0 0 64 32" className="">
+              {/* Engine nozzle at back (left side) */}
+              <rect x="8" y="14" width="4" height="4" fill="#374151" />
+              
+              {/* Main body */}
+              <rect x="12" y="12" width="40" height="8" fill="#D1D5DB" />
+              
+              {/* Nose cone - circular front */}
+              <circle cx="52" cy="16" r="4" fill="#9CA3AF" />
+              
+              {/* Top wing */}
+              <polygon points="24,12 32,8 36,12" fill="#6B7280" />
+              
+              {/* Bottom wing */}
+              <polygon points="24,20 32,24 36,20" fill="#6B7280" />
+              
+              {/* Additional top fin */}
+              <polygon points="16,12 20,6 24,12" fill="#4B5563" />
+              
+              {/* Additional bottom fin */}
+              <polygon points="16,20 20,26 24,20" fill="#4B5563" />
+              
+              {/* Top Solar Panel */}
+              <rect x="28" y="6" width="12" height="2" fill="#1E40AF" opacity="0.8" />
+              <rect x="29" y="6.5" width="10" height="1" fill="#3B82F6" opacity="0.6" />
+              
+              {/* Bottom Solar Panel */}
+              <rect x="28" y="24" width="12" height="2" fill="#1E40AF" opacity="0.8" />
+              <rect x="29" y="24.5" width="10" height="1" fill="#3B82F6" opacity="0.6" />
+              
+              {/* Window */}
+              <circle cx="40" cy="16" r="2" fill="#60A5FA" opacity="0.7" />
+            </svg>
+          </div>
+        </div>
+        
+        {/* Progress bar */}
+        <div className="absolute bottom-0 left-0 right-0 h-2 bg-gray-800">
+          <div
+            className="h-full bg-gradient-to-r from-blue-500 to-red-500 transition-all duration-500"
+            style={{ width: `${progressPercent}%` }}
+          />
+        </div>
+      </div>
+
+      {/* Main Game Area */}
+      <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* Resources Panel */}
+        <div className="bg-gray-800 p-4 rounded-lg">
+          <h3 className="text-xl font-bold mb-3 flex items-center gap-2">
+            <Wrench className="w-5 h-5" /> Ship Status
+          </h3>
+          <div className="flex gap-4">
+            <div className="flex-1 space-y-2">
+              <ResourceBar label="Hull" value={resources.hull} color="bg-blue-500" />
+              <ResourceBar label="Oxygen" value={resources.oxygen} color="bg-green-500" />
+              <ResourceBar label="Water" value={resources.water} color="bg-cyan-500" />
+              <ResourceBar label="Fuel" value={resources.fuel} color="bg-yellow-500" />
+              <ResourceBar label="Food" value={resources.food} color="bg-orange-500" />
+              <div className="pt-2 border-t border-gray-700">
+                <p className="text-sm">Repair Parts: {resources.repairParts}</p>
+              </div>
+            </div>
+            
+            {/* Action Buttons */}
+            <div className="flex flex-col gap-2 justify-center">
+              <button
+                onClick={synthesizeWater}
+                disabled={resources.oxygen < 20 || resources.fuel < 20}
+                className="bg-cyan-600 hover:bg-cyan-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-bold py-2 px-3 rounded text-xs transition whitespace-nowrap"
+              >
+                Synthesize H₂O
+                <div className="text-xs opacity-75">-20% O₂/Fuel</div>
+                <div className="text-xs opacity-75">+30% Water</div>
+              </button>
+              
+              <button
+                onClick={activateAfterburner}
+                disabled={afterburnerActive || afterburnerCooldown > 0 || resources.fuel < 20}
+                className="bg-red-600 hover:bg-red-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-bold py-2 px-3 rounded text-xs transition whitespace-nowrap"
+              >
+                {afterburnerActive ? `Burning (${afterburnerDaysRemaining}d)` : afterburnerCooldown > 0 ? `Cooldown (${afterburnerCooldown}d)` : 'Afterburner'}
+                <div className="text-xs opacity-75">{afterburnerActive ? '2x speed, 4x fuel' : '5d @ 2x speed'}</div>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Event/Main Panel */}
+        <div className="bg-gray-800 p-4 rounded-lg">
+          {currentEvent ? (
+            <div>
+              <h3 className="text-2xl font-bold mb-3 text-red-400">{currentEvent.title}</h3>
+              <p className="mb-4 text-gray-300">{currentEvent.description}</p>
+              <div className="space-y-2">
+                {currentEvent.choices.map((choice, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => handleChoice(choice)}
+                    className="w-full bg-gray-700 hover:bg-gray-600 p-3 rounded text-left transition"
+                  >
+                    {choice.text}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="text-center py-8">
+              <Rocket className="w-16 h-16 mx-auto mb-4 text-gray-600 animate-pulse" />
+              <p className="text-gray-400">Traveling through space...</p>
+              <p className="text-sm text-gray-500 mt-2">Systems nominal</p>
+            </div>
+          )}
+        </div>
+
+        {/* Crew Panel */}
+        <div className="bg-gray-800 p-4 rounded-lg">
+          <h3 className="text-xl font-bold mb-3 flex items-center gap-2">
+            <Users className="w-5 h-5" /> Crew Status
+          </h3>
+          <div className="space-y-3">
+            {crew.map((member, idx) => (
+              <div key={idx} className={`p-2 rounded ${member.alive ? 'bg-gray-700' : 'bg-red-900'}`}>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="font-semibold">{member.name}</span>
+                  <Heart className={`w-4 h-4 ${member.alive ? 'text-red-500' : 'text-gray-500'}`} />
+                </div>
+                <p className="text-xs text-gray-400">{member.role}</p>
+                <ResourceBar label="" value={member.health} color={member.alive ? "bg-red-500" : "bg-gray-600"} small />
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Log */}
+      <div className="max-w-6xl mx-auto mt-4 bg-gray-800 p-4 rounded-lg">
+        <h3 className="text-lg font-bold mb-2">Mission Log</h3>
+        <div className="space-y-1 text-sm text-gray-300 max-h-32 overflow-y-auto">
+          {log.map((entry, idx) => (
+            <p key={idx}>&gt; {entry}</p>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const ResourceBar = ({ label, value, color, small = false }) => (
+  <div>
+    {label && <p className={`${small ? 'text-xs' : 'text-sm'} mb-1`}>{label}: {Math.round(value)}%</p>}
+    <div className={`w-full bg-gray-700 rounded ${small ? 'h-1' : 'h-2'}`}>
+      <div
+        className={`${color} ${small ? 'h-1' : 'h-2'} rounded transition-all duration-300`}
+        style={{ width: `${Math.max(0, Math.min(100, value))}%` }}
+      />
+    </div>
+  </div>
+);
+
+export default MarsTrail;
